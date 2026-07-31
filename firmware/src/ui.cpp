@@ -7,6 +7,7 @@
 #include "icons.h"
 #include "codex_icon.h"
 #include "ohiggins_icon.h"
+#include "ohiggins_icon_big.h"
 #include "display_cfg.h"
 
 // Custom fonts (scaled for 314 PPI, ~1.9x from original 165 PPI)
@@ -112,6 +113,10 @@ static lv_obj_t* lbl_net_rssi;
 static lv_obj_t* ohiggins_container;
 static lv_obj_t* ohiggins_icon_img;
 static lv_image_dsc_t ohiggins_icon_dsc;
+// ---- O'Higgins full-screen splash (big pulsing crest) ----
+static lv_obj_t* ohiggins_splash_container;
+static lv_obj_t* ohiggins_splash_img;
+static lv_image_dsc_t ohiggins_splash_icon_dsc;
 static lv_obj_t* lbl_oh_date;
 static lv_obj_t* lbl_oh_temp;
 static lv_obj_t* lbl_oh_desc;
@@ -720,6 +725,32 @@ static void init_ohiggins_screen(lv_obj_t* scr) {
     lv_obj_add_flag(ohiggins_container, LV_OBJ_FLAG_HIDDEN);
 }
 
+// ======== O'Higgins Full-Screen Splash (480x480) ========
+// Big static crest. Entered via touch from SCREEN_OHIGGINS, same pattern
+// as the Claude/Codex splash <-> usage screen pairs.
+// NOTE: no transform_zoom animation here — profiled to pin the render loop
+// (a 320x320 RGB565A8 image resampled every animation frame is too slow for
+// software rendering on this MCU and starves loop()/Serial processing).
+
+static void init_ohiggins_splash_screen(lv_obj_t* scr) {
+    ohiggins_splash_container = lv_obj_create(scr);
+    lv_obj_set_size(ohiggins_splash_container, SCR_W, SCR_H);
+    lv_obj_set_pos(ohiggins_splash_container, 0, 0);
+    lv_obj_set_style_bg_color(ohiggins_splash_container, COL_BG, 0);
+    lv_obj_set_style_bg_opa(ohiggins_splash_container, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(ohiggins_splash_container, 0, 0);
+    lv_obj_set_style_pad_all(ohiggins_splash_container, 0, 0);
+    lv_obj_clear_flag(ohiggins_splash_container, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(ohiggins_splash_container, global_click_cb, LV_EVENT_CLICKED, NULL);
+
+    init_icon_dsc_rgb565a8(&ohiggins_splash_icon_dsc, OHIGGINS_ICON_BIG_W, OHIGGINS_ICON_BIG_H, ohiggins_icon_big_data);
+    ohiggins_splash_img = lv_image_create(ohiggins_splash_container);
+    lv_image_set_src(ohiggins_splash_img, &ohiggins_splash_icon_dsc);
+    lv_obj_center(ohiggins_splash_img);
+
+    lv_obj_add_flag(ohiggins_splash_container, LV_OBJ_FLAG_HIDDEN);
+}
+
 // ======== Public API ========
 
 void ui_init(void) {
@@ -740,6 +771,7 @@ void ui_init(void) {
     init_provider_screen(scr);
     init_network_screen(scr);
     init_ohiggins_screen(scr);
+    init_ohiggins_splash_screen(scr);
     splash_init(scr);
 
     codex_splash_init(scr);
@@ -889,7 +921,8 @@ static screen_t prev_non_splash_screen = SCREEN_USAGE;
 // two-line date and has no device-battery row) but keeps the shared clock.
 static void apply_battery_visibility(void) {
     if (!battery_img) return;
-    bool splash_mode = (current_screen == SCREEN_SPLASH || current_screen == SCREEN_CODEX_SPLASH);
+    bool splash_mode = (current_screen == SCREEN_SPLASH || current_screen == SCREEN_CODEX_SPLASH ||
+                        current_screen == SCREEN_OHIGGINS_SPLASH);
     bool ohiggins_mode = (current_screen == SCREEN_OHIGGINS);
 
     lv_obj_t* clock_only_hidden_on[] = { lbl_clock, div_header, div_clock };
@@ -977,6 +1010,7 @@ static bool screen_is_visible(screen_t screen) {
         return ui_generic_enabled();
     case SCREEN_NETWORK:
     case SCREEN_OHIGGINS:
+    case SCREEN_OHIGGINS_SPLASH:
         return true;
     default:
         return false;
@@ -999,6 +1033,7 @@ void ui_show_screen(screen_t screen) {
     lv_obj_add_flag(provider_container, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(net_container,      LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(ohiggins_container, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ohiggins_splash_container, LV_OBJ_FLAG_HIDDEN);
     if (codex_icon_img)    lv_obj_add_flag(codex_icon_img, LV_OBJ_FLAG_HIDDEN);
     if (ohiggins_icon_img) lv_obj_add_flag(ohiggins_icon_img, LV_OBJ_FLAG_HIDDEN);
     splash_hide();
@@ -1028,21 +1063,25 @@ void ui_show_screen(screen_t screen) {
         lv_obj_clear_flag(ohiggins_container, LV_OBJ_FLAG_HIDDEN);
         if (ohiggins_icon_img) lv_obj_clear_flag(ohiggins_icon_img, LV_OBJ_FLAG_HIDDEN);
         break;
+    case SCREEN_OHIGGINS_SPLASH:
+        lv_obj_clear_flag(ohiggins_splash_container, LV_OBJ_FLAG_HIDDEN);
+        break;
     default:
         break;
     }
 
     // Logo: hidden on splash screens, Codex screen (cloud icon), generic
-    // provider screen, and the O'Higgins screen (crest icon instead)
+    // provider screen, and the O'Higgins screens (crest icon instead)
     if (logo_img) {
         bool hide_logo = (screen == SCREEN_SPLASH || screen == SCREEN_CODEX ||
                           screen == SCREEN_CODEX_SPLASH || screen == SCREEN_PROVIDER ||
-                          screen == SCREEN_OHIGGINS);
+                          screen == SCREEN_OHIGGINS || screen == SCREEN_OHIGGINS_SPLASH);
         if (hide_logo) lv_obj_add_flag(logo_img, LV_OBJ_FLAG_HIDDEN);
         else           lv_obj_clear_flag(logo_img, LV_OBJ_FLAG_HIDDEN);
     }
 
-    bool is_splash = (screen == SCREEN_SPLASH || screen == SCREEN_CODEX_SPLASH);
+    bool is_splash = (screen == SCREEN_SPLASH || screen == SCREEN_CODEX_SPLASH ||
+                      screen == SCREEN_OHIGGINS_SPLASH);
     if (!is_splash) prev_non_splash_screen = screen;
     current_screen = screen;
     apply_battery_visibility();
@@ -1122,6 +1161,10 @@ void ui_toggle_splash(void) {
         else if (claude_on)  ui_show_screen(SCREEN_SPLASH);
         else if (codex_on)   ui_show_screen(SCREEN_CODEX_SPLASH);
         else if (generic_on) ui_show_screen(SCREEN_PROVIDER);
+    } else if (current_screen == SCREEN_OHIGGINS) {
+        ui_show_screen(SCREEN_OHIGGINS_SPLASH);
+    } else if (current_screen == SCREEN_OHIGGINS_SPLASH) {
+        ui_show_screen(SCREEN_OHIGGINS);
     } else {
         screen_t preferred = preferred_provider_usage_screen();
         if      (preferred == SCREEN_CODEX    && codex_on)   ui_show_screen(SCREEN_CODEX_SPLASH);

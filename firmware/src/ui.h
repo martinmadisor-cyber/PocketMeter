@@ -9,6 +9,7 @@ enum screen_t {
     SCREEN_PROVIDER,      // Generic provider screen (Gemini, Copilot, etc.)
     SCREEN_NETWORK,
     SCREEN_OHIGGINS,      // Fan theme: crest, clock, date, weather, Claude mini-stats
+    SCREEN_OHIGGINS_SPLASH, // Fan theme: full-screen animated crest
     SCREEN_COUNT,
 };
 
