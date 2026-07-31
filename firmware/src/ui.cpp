@@ -545,6 +545,7 @@ static void init_network_screen(lv_obj_t* scr) {
     lv_obj_set_style_border_width(net_container, 0, 0);
     lv_obj_set_style_pad_all(net_container, 0, 0);
     lv_obj_clear_flag(net_container, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(net_container, global_click_cb, LV_EVENT_CLICKED, NULL);
 
     // Title
     lv_obj_t* lbl_net_title = lv_label_create(net_container);
@@ -1019,11 +1020,11 @@ static bool screen_is_visible(screen_t screen) {
 
 // LVGL handles click debouncing internally. Screen-level handler fires when
 // no child consumed the event (children only consume if they have their own
-// event callback, e.g. the Reset Bluetooth zone). On BT screen we skip the
-// splash toggle so only the reset zone is interactive there.
+// event callback). Every screen container registers this same handler,
+// including net_container (previously missing, which silently ate taps on
+// the Network screen and made it a dead end).
 static void global_click_cb(lv_event_t* e) {
     (void)e;
-    if (ui_get_current_screen() == SCREEN_NETWORK) return;
     ui_toggle_splash();
 }
 
@@ -1140,6 +1141,32 @@ void ui_toggle_splash(void) {
     bool codex_on   = ui_codex_enabled();
     bool generic_on = ui_generic_enabled();
 
+    // The screen chain below (Splash/Usage/Codex(_Splash)/Provider) is a closed
+    // loop between whichever providers are enabled — it never "runs out" of a
+    // match, so Network/O'Higgins can't be reached as a plain fallback at the
+    // end of a condition chain (there's almost always a provider enabled).
+    // Instead, force a detour to Network -> O'Higgins -> O'Higgins splash
+    // every few taps, independent of provider state, then resume the normal
+    // cycle where it left off.
+    static uint8_t taps_since_detour = 0;
+
+    if (current_screen == SCREEN_NETWORK) {
+        ui_show_screen(SCREEN_OHIGGINS);
+        return;
+    } else if (current_screen == SCREEN_OHIGGINS) {
+        ui_show_screen(SCREEN_OHIGGINS_SPLASH);
+        return;
+    } else if (current_screen == SCREEN_OHIGGINS_SPLASH) {
+        ui_show_screen(preferred_provider_usage_screen());
+        return;
+    }
+
+    if (++taps_since_detour >= 4) {
+        taps_since_detour = 0;
+        ui_show_screen(SCREEN_NETWORK);
+        return;
+    }
+
     if (current_screen == SCREEN_SPLASH) {
         if (claude_on)       ui_show_screen(SCREEN_USAGE);
         else if (generic_on) ui_show_screen(SCREEN_PROVIDER);
@@ -1161,10 +1188,6 @@ void ui_toggle_splash(void) {
         else if (claude_on)  ui_show_screen(SCREEN_SPLASH);
         else if (codex_on)   ui_show_screen(SCREEN_CODEX_SPLASH);
         else if (generic_on) ui_show_screen(SCREEN_PROVIDER);
-    } else if (current_screen == SCREEN_OHIGGINS) {
-        ui_show_screen(SCREEN_OHIGGINS_SPLASH);
-    } else if (current_screen == SCREEN_OHIGGINS_SPLASH) {
-        ui_show_screen(SCREEN_OHIGGINS);
     } else {
         screen_t preferred = preferred_provider_usage_screen();
         if      (preferred == SCREEN_CODEX    && codex_on)   ui_show_screen(SCREEN_CODEX_SPLASH);
