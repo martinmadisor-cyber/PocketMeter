@@ -28,7 +28,6 @@ if ! "$PYTHON" -c "import PIL" 2>/dev/null; then
     echo "[web-server] Using Pillow from: $NIX_SITEPKGS" >&2
   fi
 fi
-fi
 
 # Defaults
 export POCKETMETER_WEB_PORT="${POCKETMETER_WEB_PORT:-8080}"

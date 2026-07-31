@@ -6,6 +6,7 @@
 #include "logo.h"
 #include "icons.h"
 #include "codex_icon.h"
+#include "ohiggins_icon.h"
 #include "display_cfg.h"
 
 // Custom fonts (scaled for 314 PPI, ~1.9x from original 165 PPI)
@@ -15,6 +16,8 @@ LV_FONT_DECLARE(font_styrene_28);
 LV_FONT_DECLARE(font_styrene_24);
 LV_FONT_DECLARE(font_styrene_20);
 LV_FONT_DECLARE(font_mono_32);
+LV_FONT_DECLARE(font_styrene_clock);
+LV_FONT_DECLARE(font_styrene_temp);
 
 // Anthropic brand palette — design tokens live in theme.h
 #include "theme.h"
@@ -33,8 +36,16 @@ LV_FONT_DECLARE(font_mono_32);
 #define SCR_H         480
 #define MARGIN        20    // wider margin for rounded display corners
 #define TITLE_Y       30
-#define CONTENT_Y     100
 #define CONTENT_W     (SCR_W - 2 * MARGIN)   // 440
+
+// Hero clock + date block (shared, sits below the title on every screen)
+#define HDR_DIV_Y     95     // divider under the title row
+#define CLOCK_Y       100
+#define CLOCK_DIV_Y   186    // divider under the giant clock
+#define DATE_Y        196
+#define DATE_DIV_Y    234    // divider under the date line
+#define CONTENT_Y     244
+#define CONTENT_END_Y 420    // bottom of the stat-row area (leaves room for anim text)
 
 // ---- Usage screen widgets ----
 static lv_obj_t* usage_container;
@@ -97,10 +108,30 @@ static lv_obj_t* lbl_net_ssid;
 static lv_obj_t* lbl_net_ip;
 static lv_obj_t* lbl_net_rssi;
 
+// ---- O'Higgins fan-theme screen widgets ----
+static lv_obj_t* ohiggins_container;
+static lv_obj_t* ohiggins_icon_img;
+static lv_image_dsc_t ohiggins_icon_dsc;
+static lv_obj_t* lbl_oh_date;
+static lv_obj_t* lbl_oh_temp;
+static lv_obj_t* lbl_oh_desc;
+static lv_obj_t* lbl_oh_humidity_wind;
+static lv_obj_t* lbl_oh_current_pct;
+static lv_obj_t* bar_oh_current;
+static lv_obj_t* lbl_oh_weekly_pct;
+static lv_obj_t* bar_oh_weekly;
+
 // ---- Battery indicator (shared, on top) ----
 static lv_obj_t* battery_img;
 static lv_obj_t* logo_img;
 static lv_image_dsc_t battery_dscs[5];  // empty, low, medium, full, charging
+
+// ---- Hero clock + date (shared, below the title, on top of all containers) ----
+static lv_obj_t* lbl_clock;
+static lv_obj_t* lbl_date;
+static lv_obj_t* div_header;
+static lv_obj_t* div_clock;
+static lv_obj_t* div_date;
 
 // ---- Shared ----
 static lv_image_dsc_t logo_dsc;
@@ -209,6 +240,20 @@ static lv_obj_t* make_panel(lv_obj_t* parent, int x, int y, int w, int h) {
     return panel;
 }
 
+static lv_obj_t* make_divider(lv_obj_t* parent, int x, int y, int w) {
+    lv_obj_t* div = lv_obj_create(parent);
+    lv_obj_set_pos(div, x, y);
+    lv_obj_set_size(div, w, 1);
+    lv_obj_set_style_bg_color(div, COL_BAR_BG, 0);
+    lv_obj_set_style_bg_opa(div, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(div, 0, 0);
+    lv_obj_set_style_radius(div, 0, 0);
+    lv_obj_set_style_pad_all(div, 0, 0);
+    lv_obj_clear_flag(div, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(div, LV_OBJ_FLAG_EVENT_BUBBLE);
+    return div;
+}
+
 static lv_obj_t* make_bar(lv_obj_t* parent, int x, int y, int w, int h) {
     lv_obj_t* bar = lv_bar_create(parent);
     lv_obj_set_pos(bar, x, y);
@@ -270,35 +315,46 @@ static void init_battery_icons(void) {
 
 // ======== Usage Screen (480x480) ========
 
-#define PANEL_H     150
-#define PANEL_GAP   16
+#define ROW_H       90
 
-// One Session/Weekly panel: big % label, pill on the right, bar, reset label.
-// Pill y=1: symmetric inside the panel — panel-outer-top → pill-top equals
-// pill-bottom → bar-top (pill height 42 + panel pad_top 12 + bar y=56).
-static lv_obj_t* make_usage_panel(lv_obj_t* parent, int y, const char* pill_text,
+// One Current/Weekly stat row (flat, no card): big % on the left, label at
+// top-right, reset text below it at bottom-right, full-width bar underneath,
+// thin divider under that.
+static lv_obj_t* make_usage_panel(lv_obj_t* parent, int y, const char* label_text,
                                   lv_obj_t** out_pct, lv_obj_t** out_pill,
                                   lv_obj_t** out_bar, lv_obj_t** out_reset) {
-    lv_obj_t* panel = make_panel(parent, MARGIN, y, CONTENT_W, PANEL_H);
+    lv_obj_t* row = lv_obj_create(parent);
+    lv_obj_set_pos(row, MARGIN, y);
+    lv_obj_set_size(row, CONTENT_W, ROW_H);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_EVENT_BUBBLE);
 
-    *out_pct = lv_label_create(panel);
+    *out_pct = lv_label_create(row);
     lv_label_set_text(*out_pct, "---%");
     lv_obj_set_style_text_font(*out_pct, &font_styrene_48, 0);
     lv_obj_set_style_text_color(*out_pct, COL_TEXT, 0);
     lv_obj_set_pos(*out_pct, 0, 0);
 
-    *out_pill = make_pill(panel, pill_text);
-    lv_obj_align(*out_pill, LV_ALIGN_TOP_RIGHT, 0, 1);
+    *out_pill = lv_label_create(row);
+    lv_label_set_text(*out_pill, label_text);
+    lv_obj_set_style_text_font(*out_pill, &font_styrene_28, 0);
+    lv_obj_set_style_text_color(*out_pill, COL_TEXT, 0);
+    lv_obj_align(*out_pill, LV_ALIGN_TOP_RIGHT, 0, 6);
 
-    *out_bar = make_bar(panel, 0, 56, CONTENT_W - 32, 24);
-
-    *out_reset = lv_label_create(panel);
+    *out_reset = lv_label_create(row);
     lv_label_set_text(*out_reset, "---");
-    lv_obj_set_style_text_font(*out_reset, &font_styrene_28, 0);
+    lv_obj_set_style_text_font(*out_reset, &font_styrene_20, 0);
     lv_obj_set_style_text_color(*out_reset, COL_DIM, 0);
-    lv_obj_set_pos(*out_reset, 0, 94);
+    lv_obj_align(*out_reset, LV_ALIGN_TOP_RIGHT, 0, 44);
 
-    return panel;
+    *out_bar = make_bar(row, 0, 70, CONTENT_W, 12);
+
+    make_divider(row, 0, ROW_H - 4, CONTENT_W);
+
+    return row;
 }
 
 static lv_obj_t* make_credit_panel(lv_obj_t* parent, int y, int h,
@@ -349,11 +405,11 @@ static void init_usage_screen(lv_obj_t* scr) {
     panel_session = make_usage_panel(usage_container, CONTENT_Y, "Current",
                                      &lbl_session_pct, &lbl_session_label,
                                      &bar_session, &lbl_session_reset);
-    panel_weekly = make_usage_panel(usage_container, CONTENT_Y + PANEL_H + PANEL_GAP, "Weekly",
+    panel_weekly = make_usage_panel(usage_container, CONTENT_Y + ROW_H, "Weekly",
                                     &lbl_weekly_pct, &lbl_weekly_label,
                                     &bar_weekly, &lbl_weekly_reset);
 
-    panel_credit = make_credit_panel(usage_container, CONTENT_Y, 316,
+    panel_credit = make_credit_panel(usage_container, CONTENT_Y, CONTENT_END_Y - CONTENT_Y,
                                      &lbl_credit_balance, &lbl_credit_plan);
     lv_obj_add_flag(panel_credit, LV_OBJ_FLAG_HIDDEN);
 
@@ -387,7 +443,7 @@ static void init_codex_screen(lv_obj_t* scr) {
     panel_codex_session = make_usage_panel(codex_container, CONTENT_Y, "Current",
                                            &lbl_codex_session_pct, &lbl_codex_session_label,
                                            &bar_codex_session, &lbl_codex_session_reset);
-    panel_codex_weekly = make_usage_panel(codex_container, CONTENT_Y + PANEL_H + PANEL_GAP, "Weekly",
+    panel_codex_weekly = make_usage_panel(codex_container, CONTENT_Y + ROW_H, "Weekly",
                                           &lbl_codex_weekly_pct, &lbl_codex_weekly_label,
                                           &bar_codex_weekly, &lbl_codex_weekly_reset);
 
@@ -396,7 +452,7 @@ static void init_codex_screen(lv_obj_t* scr) {
     lv_obj_set_style_bg_color(bar_codex_weekly,  THEME_CODEX, LV_PART_INDICATOR);
 
     // Credit panel
-    panel_codex_credit = make_credit_panel(codex_container, CONTENT_Y, 316,
+    panel_codex_credit = make_credit_panel(codex_container, CONTENT_Y, CONTENT_END_Y - CONTENT_Y,
                                            &lbl_codex_credit_balance, &lbl_codex_credit_plan);
     lv_obj_add_flag(panel_codex_credit, LV_OBJ_FLAG_HIDDEN);
 
@@ -456,54 +512,18 @@ static void init_provider_screen(lv_obj_t* scr) {
     lv_obj_set_style_text_color(lbl_provider_title, COL_TEXT, 0);
     lv_obj_align(lbl_provider_title, LV_ALIGN_TOP_MID, 16, TITLE_Y);
 
-    // Session panel
-    panel_provider_session = make_panel(provider_container, MARGIN, CONTENT_Y, CONTENT_W, 130);
+    // Session/Weekly rows (same flat layout as Usage/Codex)
+    lv_obj_t* lbl_provider_session_label;
+    lv_obj_t* lbl_provider_weekly_label;
+    panel_provider_session = make_usage_panel(provider_container, CONTENT_Y, "Session",
+                                              &lbl_provider_session_pct, &lbl_provider_session_label,
+                                              &bar_provider_session, &lbl_provider_session_reset);
+    panel_provider_weekly = make_usage_panel(provider_container, CONTENT_Y + ROW_H, "Weekly",
+                                             &lbl_provider_weekly_pct, &lbl_provider_weekly_label,
+                                             &bar_provider_weekly, &lbl_provider_weekly_reset);
 
-    lbl_provider_session_pct = lv_label_create(panel_provider_session);
-    lv_label_set_text(lbl_provider_session_pct, "0%");
-    lv_obj_set_style_text_font(lbl_provider_session_pct, &font_styrene_48, 0);
-    lv_obj_set_style_text_color(lbl_provider_session_pct, COL_GREEN, 0);
-    lv_obj_set_pos(lbl_provider_session_pct, 0, 0);
-
-    lv_obj_t* lbl_prov_sess_lbl = lv_label_create(panel_provider_session);
-    lv_label_set_text(lbl_prov_sess_lbl, "Session");
-    lv_obj_set_style_text_font(lbl_prov_sess_lbl, &font_styrene_20, 0);
-    lv_obj_set_style_text_color(lbl_prov_sess_lbl, COL_DIM, 0);
-    lv_obj_set_pos(lbl_prov_sess_lbl, 0, 56);
-
-    bar_provider_session = make_bar(panel_provider_session, 0, 82, CONTENT_W - 32, 14);
-
-    lbl_provider_session_reset = lv_label_create(panel_provider_session);
-    lv_label_set_text(lbl_provider_session_reset, "---");
-    lv_obj_set_style_text_font(lbl_provider_session_reset, &font_styrene_20, 0);
-    lv_obj_set_style_text_color(lbl_provider_session_reset, COL_DIM, 0);
-    lv_obj_set_pos(lbl_provider_session_reset, 0, 102);
-
-    // Weekly panel
-    panel_provider_weekly = make_panel(provider_container, MARGIN, CONTENT_Y + 148, CONTENT_W, 130);
-
-    lbl_provider_weekly_pct = lv_label_create(panel_provider_weekly);
-    lv_label_set_text(lbl_provider_weekly_pct, "0%");
-    lv_obj_set_style_text_font(lbl_provider_weekly_pct, &font_styrene_48, 0);
-    lv_obj_set_style_text_color(lbl_provider_weekly_pct, COL_GREEN, 0);
-    lv_obj_set_pos(lbl_provider_weekly_pct, 0, 0);
-
-    lv_obj_t* lbl_prov_week_lbl = lv_label_create(panel_provider_weekly);
-    lv_label_set_text(lbl_prov_week_lbl, "Weekly");
-    lv_obj_set_style_text_font(lbl_prov_week_lbl, &font_styrene_20, 0);
-    lv_obj_set_style_text_color(lbl_prov_week_lbl, COL_DIM, 0);
-    lv_obj_set_pos(lbl_prov_week_lbl, 0, 56);
-
-    bar_provider_weekly = make_bar(panel_provider_weekly, 0, 82, CONTENT_W - 32, 14);
-
-    lbl_provider_weekly_reset = lv_label_create(panel_provider_weekly);
-    lv_label_set_text(lbl_provider_weekly_reset, "---");
-    lv_obj_set_style_text_font(lbl_provider_weekly_reset, &font_styrene_20, 0);
-    lv_obj_set_style_text_color(lbl_provider_weekly_reset, COL_DIM, 0);
-    lv_obj_set_pos(lbl_provider_weekly_reset, 0, 102);
-
-    // Credit panel (spans both original panel heights)
-    panel_provider_credit = make_credit_panel(provider_container, CONTENT_Y, 278,
+    // Credit panel (spans the same content area as the two rows above)
+    panel_provider_credit = make_credit_panel(provider_container, CONTENT_Y, CONTENT_END_Y - CONTENT_Y,
                                               &lbl_provider_credit_balance, &lbl_provider_credit_plan);
     lv_obj_add_flag(panel_provider_credit, LV_OBJ_FLAG_HIDDEN);
 
@@ -528,8 +548,14 @@ static void init_network_screen(lv_obj_t* scr) {
     lv_obj_set_style_text_color(lbl_net_title, COL_TEXT, 0);
     lv_obj_align(lbl_net_title, LV_ALIGN_TOP_MID, 16, TITLE_Y);
 
-    // Info panel
-    lv_obj_t* p_info = make_panel(net_container, MARGIN, CONTENT_Y, CONTENT_W, 200);
+    // Info block (flat, no card — matches the rest of the app)
+    lv_obj_t* p_info = lv_obj_create(net_container);
+    lv_obj_set_pos(p_info, MARGIN, CONTENT_Y);
+    lv_obj_set_size(p_info, CONTENT_W, CONTENT_END_Y - CONTENT_Y);
+    lv_obj_set_style_bg_opa(p_info, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(p_info, 0, 0);
+    lv_obj_set_style_pad_all(p_info, 0, 0);
+    lv_obj_clear_flag(p_info, LV_OBJ_FLAG_SCROLLABLE);
 
     // WiFi label
     lv_obj_t* wifi_icon = lv_label_create(p_info);
@@ -544,23 +570,25 @@ static void init_network_screen(lv_obj_t* scr) {
     lv_obj_set_style_text_color(lbl_net_status, COL_DIM, 0);
     lv_obj_set_pos(lbl_net_status, 56, 2);
 
+    make_divider(p_info, 0, 60, CONTENT_W);
+
     lbl_net_ssid = lv_label_create(p_info);
     lv_label_set_text(lbl_net_ssid, "SSID: ---");
     lv_obj_set_style_text_font(lbl_net_ssid, &font_styrene_28, 0);
     lv_obj_set_style_text_color(lbl_net_ssid, COL_DIM, 0);
-    lv_obj_set_pos(lbl_net_ssid, 0, 64);
+    lv_obj_set_pos(lbl_net_ssid, 0, 76);
 
     lbl_net_ip = lv_label_create(p_info);
     lv_label_set_text(lbl_net_ip, "IP: ---");
     lv_obj_set_style_text_font(lbl_net_ip, &font_styrene_28, 0);
     lv_obj_set_style_text_color(lbl_net_ip, COL_DIM, 0);
-    lv_obj_set_pos(lbl_net_ip, 0, 100);
+    lv_obj_set_pos(lbl_net_ip, 0, 116);
 
     lbl_net_rssi = lv_label_create(p_info);
     lv_label_set_text(lbl_net_rssi, "RSSI: --- dBm");
     lv_obj_set_style_text_font(lbl_net_rssi, &font_styrene_28, 0);
     lv_obj_set_style_text_color(lbl_net_rssi, COL_DIM, 0);
-    lv_obj_set_pos(lbl_net_rssi, 0, 136);
+    lv_obj_set_pos(lbl_net_rssi, 0, 156);
 
     // Attribution
     lv_obj_t* lbl_credit = lv_label_create(net_container);
@@ -577,6 +605,119 @@ static void init_network_screen(lv_obj_t* scr) {
 
     // Start hidden
     lv_obj_add_flag(net_container, LV_OBJ_FLAG_HIDDEN);
+}
+
+// ======== O'Higgins Fan Theme Screen (480x480) ========
+// Own crest icon (shown in the shared logo slot), own title, own two-line
+// date (the shared clock is reused as-is), a weather box, and two compact
+// boxed mini-stats mirroring Claude's Current/Weekly usage.
+
+#define OH_DATE_Y      196
+#define OH_DATE_DIV_Y  268
+#define OH_CONTENT_Y   278
+#define OH_BOX_H       190
+#define OH_WEATHER_W   212
+#define OH_GAP         16
+#define OH_RIGHT_X     (MARGIN + OH_WEATHER_W + OH_GAP)
+#define OH_RIGHT_W     (CONTENT_W - OH_WEATHER_W - OH_GAP)
+#define OH_MINI_H      90
+#define OH_MINI_GAP    10
+
+static void init_ohiggins_screen(lv_obj_t* scr) {
+    ohiggins_container = lv_obj_create(scr);
+    lv_obj_set_size(ohiggins_container, SCR_W, SCR_H);
+    lv_obj_set_pos(ohiggins_container, 0, 0);
+    lv_obj_set_style_bg_opa(ohiggins_container, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(ohiggins_container, 0, 0);
+    lv_obj_set_style_pad_all(ohiggins_container, 0, 0);
+    lv_obj_clear_flag(ohiggins_container, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(ohiggins_container, global_click_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_color_t oh_blue = lv_color_hex(0x3FA9F5);
+
+    // Title, right of the crest (crest sits in the shared logo slot)
+    lv_obj_t* lbl_oh_title = lv_label_create(ohiggins_container);
+    lv_label_set_text(lbl_oh_title, "\xC2\xA1VAMOS O'HIGGINS!");
+    lv_obj_set_style_text_font(lbl_oh_title, &font_styrene_24, 0);
+    lv_obj_set_style_text_color(lbl_oh_title, oh_blue, 0);
+    lv_obj_set_width(lbl_oh_title, CONTENT_W - 100);
+    lv_obj_set_style_text_align(lbl_oh_title, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_pos(lbl_oh_title, MARGIN + 100, TITLE_Y + 18);
+
+    // Own two-line date (the shared clock above it is reused as-is)
+    lbl_oh_date = lv_label_create(ohiggins_container);
+    lv_label_set_text(lbl_oh_date, "---");
+    lv_obj_set_style_text_font(lbl_oh_date, &font_styrene_24, 0);
+    lv_obj_set_style_text_color(lbl_oh_date, oh_blue, 0);
+    lv_obj_set_width(lbl_oh_date, CONTENT_W);
+    lv_obj_set_style_text_align(lbl_oh_date, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(lbl_oh_date, MARGIN, OH_DATE_Y);
+
+    make_divider(ohiggins_container, MARGIN, OH_DATE_DIV_Y, CONTENT_W);
+
+    // Weather box (left)
+    lv_obj_t* p_weather = make_panel(ohiggins_container, MARGIN, OH_CONTENT_Y, OH_WEATHER_W, OH_BOX_H);
+
+    lv_obj_t* lbl_weather_title = lv_label_create(p_weather);
+    lv_label_set_text(lbl_weather_title, "CLIMA ACTUAL");
+    lv_obj_set_style_text_font(lbl_weather_title, &font_styrene_20, 0);
+    lv_obj_set_style_text_color(lbl_weather_title, COL_DIM, 0);
+    lv_obj_set_pos(lbl_weather_title, 0, 0);
+
+    lbl_oh_temp = lv_label_create(p_weather);
+    lv_label_set_text(lbl_oh_temp, "--\xC2\xB0" "C");
+    lv_obj_set_style_text_font(lbl_oh_temp, &font_styrene_temp, 0);
+    lv_obj_set_style_text_color(lbl_oh_temp, COL_TEXT, 0);
+    lv_obj_set_pos(lbl_oh_temp, 0, 34);
+
+    lbl_oh_desc = lv_label_create(p_weather);
+    lv_label_set_text(lbl_oh_desc, "---");
+    lv_obj_set_style_text_font(lbl_oh_desc, &font_styrene_20, 0);
+    lv_obj_set_style_text_color(lbl_oh_desc, COL_DIM, 0);
+    lv_obj_set_width(lbl_oh_desc, OH_WEATHER_W - 32);
+    lv_obj_set_pos(lbl_oh_desc, 0, 90);
+
+    lbl_oh_humidity_wind = lv_label_create(p_weather);
+    lv_label_set_text(lbl_oh_humidity_wind, "---");
+    lv_obj_set_style_text_font(lbl_oh_humidity_wind, &font_styrene_20, 0);
+    lv_obj_set_style_text_color(lbl_oh_humidity_wind, COL_DIM, 0);
+    lv_obj_set_pos(lbl_oh_humidity_wind, 0, 122);
+
+    // Right column: compact Current/Weekly boxes mirroring Claude's data
+    lv_obj_t* p_current = make_panel(ohiggins_container, OH_RIGHT_X, OH_CONTENT_Y, OH_RIGHT_W, OH_MINI_H);
+    lv_obj_t* lbl_current_lbl = lv_label_create(p_current);
+    lv_label_set_text(lbl_current_lbl, "Actual");
+    lv_obj_set_style_text_font(lbl_current_lbl, &font_styrene_20, 0);
+    lv_obj_set_style_text_color(lbl_current_lbl, COL_DIM, 0);
+    lv_obj_set_pos(lbl_current_lbl, 0, 0);
+    lbl_oh_current_pct = lv_label_create(p_current);
+    lv_label_set_text(lbl_oh_current_pct, "---%");
+    lv_obj_set_style_text_font(lbl_oh_current_pct, &font_styrene_28, 0);
+    lv_obj_set_style_text_color(lbl_oh_current_pct, COL_TEXT, 0);
+    lv_obj_set_pos(lbl_oh_current_pct, 0, 20);
+    bar_oh_current = make_bar(p_current, 0, 56, OH_RIGHT_W - 32, 10);
+
+    lv_obj_t* p_weekly = make_panel(ohiggins_container, OH_RIGHT_X, OH_CONTENT_Y + OH_MINI_H + OH_MINI_GAP, OH_RIGHT_W, OH_MINI_H);
+    lv_obj_t* lbl_weekly_lbl = lv_label_create(p_weekly);
+    lv_label_set_text(lbl_weekly_lbl, "Semanal");
+    lv_obj_set_style_text_font(lbl_weekly_lbl, &font_styrene_20, 0);
+    lv_obj_set_style_text_color(lbl_weekly_lbl, COL_DIM, 0);
+    lv_obj_set_pos(lbl_weekly_lbl, 0, 0);
+    lbl_oh_weekly_pct = lv_label_create(p_weekly);
+    lv_label_set_text(lbl_oh_weekly_pct, "---%");
+    lv_obj_set_style_text_font(lbl_oh_weekly_pct, &font_styrene_28, 0);
+    lv_obj_set_style_text_color(lbl_oh_weekly_pct, COL_TEXT, 0);
+    lv_obj_set_pos(lbl_oh_weekly_pct, 0, 20);
+    bar_oh_weekly = make_bar(p_weekly, 0, 56, OH_RIGHT_W - 32, 10);
+
+    // Crest icon — reuses the shared logo slot
+    init_icon_dsc_rgb565a8(&ohiggins_icon_dsc, OHIGGINS_ICON_W, OHIGGINS_ICON_H, ohiggins_icon_data);
+    ohiggins_icon_img = lv_image_create(scr);
+    lv_image_set_src(ohiggins_icon_img, &ohiggins_icon_dsc);
+    lv_obj_set_pos(ohiggins_icon_img, MARGIN, TITLE_Y - 10);
+    lv_obj_add_flag(ohiggins_icon_img, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_add_flag(ohiggins_container, LV_OBJ_FLAG_HIDDEN);
 }
 
 // ======== Public API ========
@@ -598,6 +739,7 @@ void ui_init(void) {
     init_codex_screen(scr);
     init_provider_screen(scr);
     init_network_screen(scr);
+    init_ohiggins_screen(scr);
     splash_init(scr);
 
     codex_splash_init(scr);
@@ -617,6 +759,31 @@ void ui_init(void) {
     battery_img = lv_image_create(scr);
     lv_image_set_src(battery_img, &battery_dscs[0]);
     lv_obj_set_pos(battery_img, SCR_W - 48 - MARGIN, TITLE_Y);
+
+    // Divider under the title row (shared — same y on every screen)
+    div_header = make_divider(scr, MARGIN, HDR_DIV_Y, CONTENT_W);
+
+    // Hero clock: huge, centered, shared across every non-splash screen
+    lbl_clock = lv_label_create(scr);
+    lv_label_set_text(lbl_clock, "--:--");
+    lv_obj_set_style_text_font(lbl_clock, &font_styrene_clock, 0);
+    lv_obj_set_style_text_color(lbl_clock, COL_TEXT, 0);
+    lv_obj_set_width(lbl_clock, CONTENT_W);
+    lv_obj_set_style_text_align(lbl_clock, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(lbl_clock, MARGIN, CLOCK_Y);
+
+    div_clock = make_divider(scr, MARGIN, CLOCK_DIV_Y, CONTENT_W);
+
+    // Date line, centered, in green
+    lbl_date = lv_label_create(scr);
+    lv_label_set_text(lbl_date, "---");
+    lv_obj_set_style_text_font(lbl_date, &font_styrene_28, 0);
+    lv_obj_set_style_text_color(lbl_date, COL_GREEN, 0);
+    lv_obj_set_width(lbl_date, CONTENT_W);
+    lv_obj_set_style_text_align(lbl_date, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(lbl_date, MARGIN, DATE_Y);
+
+    div_date = make_divider(scr, MARGIN, DATE_DIV_Y, CONTENT_W);
 }
 
 void ui_update(const UsageData* data) {
@@ -641,6 +808,14 @@ void ui_update(const UsageData* data) {
 
     format_reset_time(pd->weekly_reset_mins, buf, sizeof(buf));
     lv_label_set_text(lbl_weekly_reset, buf);
+
+    // Mirror the same Claude numbers on the O'Higgins screen's mini-stats
+    lv_label_set_text_fmt(lbl_oh_current_pct, "%d%%", s_pct);
+    lv_bar_set_value(bar_oh_current, s_pct, LV_ANIM_ON);
+    lv_obj_set_style_bg_color(bar_oh_current, pct_color(pd->session_pct), LV_PART_INDICATOR);
+    lv_label_set_text_fmt(lbl_oh_weekly_pct, "%d%%", w_pct);
+    lv_bar_set_value(bar_oh_weekly, w_pct, LV_ANIM_ON);
+    lv_obj_set_style_bg_color(bar_oh_weekly, pct_color(pd->weekly_pct), LV_PART_INDICATOR);
 
     // Toggle credit mode for Claude
     set_credit_mode(panel_session, panel_weekly, panel_credit, pd->has_credits);
@@ -708,13 +883,28 @@ void ui_tick_anim(void) {
 }
 
 static screen_t prev_non_splash_screen = SCREEN_USAGE;
-// Hide the battery indicator on the splash screen — the icon is visually
-// noisy over the pixel-art creature animations.
+// Hide the battery indicator and the hero clock/date block on the splash
+// screen — they're visually noisy over the pixel-art creature animations.
+// The O'Higgins screen also hides the shared date/battery (it draws its own
+// two-line date and has no device-battery row) but keeps the shared clock.
 static void apply_battery_visibility(void) {
     if (!battery_img) return;
     bool splash_mode = (current_screen == SCREEN_SPLASH || current_screen == SCREEN_CODEX_SPLASH);
-    if (splash_mode) lv_obj_add_flag(battery_img, LV_OBJ_FLAG_HIDDEN);
-    else             lv_obj_clear_flag(battery_img, LV_OBJ_FLAG_HIDDEN);
+    bool ohiggins_mode = (current_screen == SCREEN_OHIGGINS);
+
+    lv_obj_t* clock_only_hidden_on[] = { lbl_clock, div_header, div_clock };
+    for (lv_obj_t* obj : clock_only_hidden_on) {
+        if (!obj) continue;
+        if (splash_mode) lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+        else              lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    lv_obj_t* hidden_on_splash_and_ohiggins[] = { battery_img, lbl_date, div_date };
+    for (lv_obj_t* obj : hidden_on_splash_and_ohiggins) {
+        if (!obj) continue;
+        if (splash_mode || ohiggins_mode) lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+        else                              lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 static bool ui_claude_enabled(void) {
@@ -786,6 +976,7 @@ static bool screen_is_visible(screen_t screen) {
     case SCREEN_PROVIDER:
         return ui_generic_enabled();
     case SCREEN_NETWORK:
+    case SCREEN_OHIGGINS:
         return true;
     default:
         return false;
@@ -807,7 +998,9 @@ void ui_show_screen(screen_t screen) {
     lv_obj_add_flag(codex_container,    LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(provider_container, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(net_container,      LV_OBJ_FLAG_HIDDEN);
-    if (codex_icon_img) lv_obj_add_flag(codex_icon_img, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ohiggins_container, LV_OBJ_FLAG_HIDDEN);
+    if (codex_icon_img)    lv_obj_add_flag(codex_icon_img, LV_OBJ_FLAG_HIDDEN);
+    if (ohiggins_icon_img) lv_obj_add_flag(ohiggins_icon_img, LV_OBJ_FLAG_HIDDEN);
     splash_hide();
     codex_splash_hide();
 
@@ -831,14 +1024,20 @@ void ui_show_screen(screen_t screen) {
     case SCREEN_NETWORK:
         lv_obj_clear_flag(net_container, LV_OBJ_FLAG_HIDDEN);
         break;
+    case SCREEN_OHIGGINS:
+        lv_obj_clear_flag(ohiggins_container, LV_OBJ_FLAG_HIDDEN);
+        if (ohiggins_icon_img) lv_obj_clear_flag(ohiggins_icon_img, LV_OBJ_FLAG_HIDDEN);
+        break;
     default:
         break;
     }
 
-    // Logo: hidden on splash screens, Codex screen (cloud icon), and generic provider screen
+    // Logo: hidden on splash screens, Codex screen (cloud icon), generic
+    // provider screen, and the O'Higgins screen (crest icon instead)
     if (logo_img) {
         bool hide_logo = (screen == SCREEN_SPLASH || screen == SCREEN_CODEX ||
-                          screen == SCREEN_CODEX_SPLASH || screen == SCREEN_PROVIDER);
+                          screen == SCREEN_CODEX_SPLASH || screen == SCREEN_PROVIDER ||
+                          screen == SCREEN_OHIGGINS);
         if (hide_logo) lv_obj_add_flag(logo_img, LV_OBJ_FLAG_HIDDEN);
         else           lv_obj_clear_flag(logo_img, LV_OBJ_FLAG_HIDDEN);
     }
@@ -863,6 +1062,10 @@ void ui_cycle_screen(void) {
         next = show_generic ? SCREEN_PROVIDER : SCREEN_NETWORK;
     } else if (current_screen == SCREEN_PROVIDER) {
         next = SCREEN_NETWORK;
+    } else if (current_screen == SCREEN_NETWORK) {
+        next = SCREEN_OHIGGINS;
+    } else if (current_screen == SCREEN_OHIGGINS) {
+        next = preferred_provider_usage_screen();
     } else {
         next = preferred_provider_usage_screen();
     }
@@ -972,6 +1175,26 @@ void ui_update_battery(int percent, bool charging) {
     }
     lv_image_set_src(battery_img, &battery_dscs[idx]);
     apply_battery_visibility();
+}
+
+void ui_update_clock(const char* time_str) {
+    lv_label_set_text(lbl_clock, time_str);
+}
+
+void ui_update_date(const char* date_str) {
+    lv_label_set_text(lbl_date, date_str);
+}
+
+void ui_update_ohiggins_date(const char* date_str) {
+    lv_label_set_text(lbl_oh_date, date_str);
+}
+
+void ui_update_weather(const WeatherData* w) {
+    if (!w || !w->ok) return;
+    lv_label_set_text_fmt(lbl_oh_temp, "%d\xC2\xB0" "C", (int)(w->temp_c + 0.5f));
+    lv_label_set_text(lbl_oh_desc, w->description);
+    lv_label_set_text_fmt(lbl_oh_humidity_wind, "%d%%  -  %d km/h",
+                          w->humidity_pct, (int)(w->wind_kmh + 0.5f));
 }
 
 void ui_set_generic_provider(const ProviderData* pd) {

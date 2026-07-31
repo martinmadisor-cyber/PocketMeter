@@ -31,4 +31,13 @@ struct UsageData {
     bool          valid;            // false until first successful parse
 };
 
+// Current weather (Open-Meteo, fetched by the daemon — see WEATHER_URL)
+struct WeatherData {
+    bool  ok;
+    float temp_c;
+    int   humidity_pct;
+    float wind_kmh;
+    char  description[32];
+};
+
 #define CURRENT_PROVIDER 0

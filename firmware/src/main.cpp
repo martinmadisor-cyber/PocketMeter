@@ -31,6 +31,7 @@ XPowersPMU pmu;
 SensorQMI8658 imu;
 
 static UsageData usage = {};
+static WeatherData weather = {};
 
 // Find the provider that should be displayed on SCREEN_PROVIDER and push it to UI.
 // Called both when new data arrives and when selected_provider changes.
@@ -197,12 +198,21 @@ static void my_touch_cb(lv_indev_t* indev, lv_indev_data_t* data) {
 }
 
 // Parse a JSON line into UsageData
-static bool parse_json(const char* json, UsageData* out) {
+static bool parse_json(const char* json, UsageData* out, WeatherData* weather_out) {
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, json);
     if (err) {
         Serial.printf("JSON parse error: %s\n", err.c_str());
         return false;
+    }
+
+    if (weather_out && doc["weather"].is<JsonObject>()) {
+        JsonObject w = doc["weather"];
+        weather_out->ok = w["ok"] | false;
+        weather_out->temp_c = w["temp_c"] | 0.0f;
+        weather_out->humidity_pct = w["humidity_pct"] | 0;
+        weather_out->wind_kmh = w["wind_kmh"] | 0.0f;
+        strlcpy(weather_out->description, w["description"] | "", sizeof(weather_out->description));
     }
 
     // Check if it's the new multi-provider format
@@ -489,6 +499,24 @@ void loop() {
         ui_update_battery(pct, charging);
     }
 
+    // Update clock + date (NTP time-of-day), once per second
+    static unsigned long last_clock_ms = 0;
+    if (millis() - last_clock_ms >= 1000) {
+        last_clock_ms = millis();
+        char tbuf[6];
+        if (wifi_get_time_str(tbuf, sizeof(tbuf))) {
+            ui_update_clock(tbuf);
+        }
+        char dbuf[48];
+        if (wifi_get_date_str(dbuf, sizeof(dbuf))) {
+            ui_update_date(dbuf);
+        }
+        char dbuf_caps[48];
+        if (wifi_get_date_str_caps(dbuf_caps, sizeof(dbuf_caps))) {
+            ui_update_ohiggins_date(dbuf_caps);
+        }
+    }
+
     // Handle web server requests before reconciling screen visibility so web
     // toggles take effect in the same loop iteration.
     web_server_handle();
@@ -523,7 +551,8 @@ void loop() {
 
     // Process incoming WiFi data
     if (web_server_has_data()) {
-        if (parse_json(web_server_get_data(), &usage)) {
+        if (parse_json(web_server_get_data(), &usage, &weather)) {
+            ui_update_weather(&weather);
             ProviderData* current = &usage.providers[CURRENT_PROVIDER];
             int g_before = usage_rate_group();
             usage_rate_sample(current->session_pct);

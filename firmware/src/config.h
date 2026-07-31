@@ -12,6 +12,14 @@
 #define WIFI_HOSTNAME "pocketmeter"
 #define WIFI_TIMEOUT_MS 10000
 
+// Clock (NTP)
+#define NTP_SERVER1 "pool.ntp.org"
+#define NTP_SERVER2 "time.nist.gov"
+// Chile continental standard time (UTC-4). Fixed offset, no auto-DST:
+// Chile's DST law has changed repeatedly, so this is not auto-detected.
+// Add 3600 here during DST (roughly September-April) if needed.
+#define TZ_OFFSET_SEC (-4 * 3600)
+
 // Web server
 #define WEB_SERVER_PORT 80
 

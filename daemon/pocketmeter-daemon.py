@@ -559,10 +559,10 @@ class CodexProvider:
             )
             with urllib.request.urlopen(req, timeout=10) as response:
                 data        = json.loads(response.read().decode("utf-8"))
-            rate_limit  = data.get("rate_limit", {})
-            primary     = rate_limit.get("primary_window", {})
-            secondary   = rate_limit.get("secondary_window", {})
-            credits     = data.get("credits", {})
+            rate_limit  = data.get("rate_limit") or {}
+            primary     = rate_limit.get("primary_window") or {}
+            secondary   = rate_limit.get("secondary_window") or {}
+            credits     = data.get("credits") or {}
             try:
                 balance = float(credits.get("balance", 0))
             except (ValueError, TypeError):
@@ -1252,7 +1252,60 @@ def merge_provider_data(providers):
             })
 
     data["ok"] = has_data
+    data["weather"] = fetch_weather()
     return data
+
+
+# ── Weather (Open-Meteo, no API key) ─────────────────────────────────────────
+WEATHER_LAT = -34.1708
+WEATHER_LON = -70.7444
+WEATHER_URL = (
+    "https://api.open-meteo.com/v1/forecast"
+    f"?latitude={WEATHER_LAT}&longitude={WEATHER_LON}"
+    "&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code"
+    "&timezone=America%2FSantiago"
+)
+WEATHER_REFRESH_SECONDS = 900  # 15 min — Open-Meteo's current conditions don't change faster than that
+
+_WMO_DESCRIPTIONS_ES = {
+    0: "Despejado", 1: "Mayormente despejado", 2: "Parcialmente nublado", 3: "Nublado",
+    45: "Neblina", 48: "Neblina con escarcha",
+    51: "Llovizna ligera", 53: "Llovizna moderada", 55: "Llovizna intensa",
+    56: "Llovizna helada", 57: "Llovizna helada intensa",
+    61: "Lluvia ligera", 63: "Lluvia moderada", 65: "Lluvia intensa",
+    66: "Lluvia helada", 67: "Lluvia helada intensa",
+    71: "Nieve ligera", 73: "Nieve moderada", 75: "Nieve intensa", 77: "Granizo",
+    80: "Chubascos ligeros", 81: "Chubascos moderados", 82: "Chubascos violentos",
+    85: "Chubascos de nieve", 86: "Chubascos de nieve intensos",
+    95: "Tormenta eléctrica", 96: "Tormenta con granizo", 99: "Tormenta con granizo intenso",
+}
+
+_weather_cache = {"data": None, "fetched_at": 0}
+
+def fetch_weather():
+    now = time.time()
+    if _weather_cache["data"] and now - _weather_cache["fetched_at"] < WEATHER_REFRESH_SECONDS:
+        return _weather_cache["data"]
+    try:
+        req = urllib.request.Request(WEATHER_URL, headers={"User-Agent": "pocketmeter-daemon"})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            raw = json.loads(response.read().decode("utf-8"))
+        current = raw.get("current", {})
+        code = current.get("weather_code")
+        result = {
+            "ok": True,
+            "temp_c": current.get("temperature_2m"),
+            "humidity_pct": current.get("relative_humidity_2m"),
+            "wind_kmh": current.get("wind_speed_10m"),
+            "weather_code": code,
+            "description": _WMO_DESCRIPTIONS_ES.get(code, "Sin datos"),
+        }
+        _weather_cache["data"] = result
+        _weather_cache["fetched_at"] = now
+        return result
+    except Exception as e:
+        log(f"weather: fetch error: {e}", Colors.YELLOW)
+        return _weather_cache["data"] or {"ok": False}
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ enum screen_t {
     SCREEN_CODEX_SPLASH,  // Codex full-screen cloud animation
     SCREEN_PROVIDER,      // Generic provider screen (Gemini, Copilot, etc.)
     SCREEN_NETWORK,
+    SCREEN_OHIGGINS,      // Fan theme: crest, clock, date, weather, Claude mini-stats
     SCREEN_COUNT,
 };
 
@@ -20,6 +21,10 @@ void ui_toggle_splash(void);
 screen_t ui_get_current_screen(void);
 void ui_update_network_status(bool connected, const char* ssid, const char* ip, int rssi);
 void ui_update_battery(int percent, bool charging);
+void ui_update_clock(const char* time_str);
+void ui_update_date(const char* date_str);
+void ui_update_ohiggins_date(const char* date_str);
+void ui_update_weather(const WeatherData* w);
 void ui_set_codex_available(bool available);
 void ui_reconcile_provider_visibility(bool prefer_primary_provider);
 // Set the data shown on SCREEN_PROVIDER. Pass nullptr to hide the screen.

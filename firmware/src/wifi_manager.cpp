@@ -2,11 +2,19 @@
 #include "config.h"
 #include <ESPmDNS.h>
 #include <WiFi.h>
+#include <time.h>
 
 static bool connected = false;
 static bool mdns_started = false;
+static bool ntp_started = false;
 static char ip_str[16] = "0.0.0.0";
 static int last_rssi = 0;
+
+static void start_ntp(void) {
+    if (ntp_started) return;
+    configTime(TZ_OFFSET_SEC, 0, NTP_SERVER1, NTP_SERVER2);
+    ntp_started = true;
+}
 
 static void start_mdns(void) {
     if (mdns_started || WiFi.status() != WL_CONNECTED) return;
@@ -44,6 +52,7 @@ void wifi_init(void) {
         last_rssi = WiFi.RSSI();
         Serial.printf("WiFi: connected, IP=%s, RSSI=%d dBm\n", ip_str, last_rssi);
         start_mdns();
+        start_ntp();
     } else {
         connected = false;
         Serial.println("WiFi: connection failed, will retry in loop");
@@ -74,6 +83,7 @@ void wifi_check_connection(void) {
             last_rssi = WiFi.RSSI();
             Serial.printf("WiFi: reconnected, IP=%s, RSSI=%d dBm\n", ip_str, last_rssi);
             start_mdns();
+            start_ntp();
         }
     } else {
         if (!connected) {
@@ -82,6 +92,7 @@ void wifi_check_connection(void) {
             last_rssi = WiFi.RSSI();
             Serial.printf("WiFi: connected, IP=%s, RSSI=%d dBm\n", ip_str, last_rssi);
             start_mdns();
+            start_ntp();
         }
         last_rssi = WiFi.RSSI();
     }
@@ -111,4 +122,48 @@ const char* wifi_get_ssid(void) {
 
 const char* wifi_get_hostname(void) {
     return WIFI_HOSTNAME;
+}
+
+bool wifi_get_time_str(char* buf, size_t len) {
+    if (!ntp_started) return false;
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo, 0)) return false;
+    strftime(buf, len, "%H:%M", &timeinfo);
+    return true;
+}
+
+static const char* const es_weekday[] = {
+    "Domingo", "Lunes", "Martes", "Mi\xc3\xa9rcoles", "Jueves", "Viernes", "S\xc3\xa1bado"
+};
+static const char* const es_month[] = {
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+};
+
+bool wifi_get_date_str(char* buf, size_t len) {
+    if (!ntp_started) return false;
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo, 0)) return false;
+    snprintf(buf, len, "%s, %d de %s de %d",
+              es_weekday[timeinfo.tm_wday], timeinfo.tm_mday,
+              es_month[timeinfo.tm_mon], timeinfo.tm_year + 1900);
+    return true;
+}
+
+static const char* const es_weekday_caps[] = {
+    "DOMINGO", "LUNES", "MARTES", "MI\xc3\x89RCOLES", "JUEVES", "VIERNES", "S\xc3\x81BADO"
+};
+static const char* const es_month_caps[] = {
+    "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
+    "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"
+};
+
+bool wifi_get_date_str_caps(char* buf, size_t len) {
+    if (!ntp_started) return false;
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo, 0)) return false;
+    snprintf(buf, len, "%s\n%d DE %s DE %d",
+              es_weekday_caps[timeinfo.tm_wday], timeinfo.tm_mday,
+              es_month_caps[timeinfo.tm_mon], timeinfo.tm_year + 1900);
+    return true;
 }
