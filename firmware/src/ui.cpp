@@ -128,6 +128,7 @@ static lv_obj_t* bar_oh_weekly;
 
 // ---- Battery indicator (shared, on top) ----
 static lv_obj_t* battery_img;
+static lv_obj_t* lbl_battery_pct;
 static lv_obj_t* logo_img;
 static lv_image_dsc_t battery_dscs[5];  // empty, low, medium, full, charging
 
@@ -793,6 +794,14 @@ void ui_init(void) {
     lv_image_set_src(battery_img, &battery_dscs[0]);
     lv_obj_set_pos(battery_img, SCR_W - 48 - MARGIN, TITLE_Y);
 
+    // Percent readout, left of the icon — so charging state and level are
+    // both visible even at a glance (the icon alone is easy to misread).
+    lbl_battery_pct = lv_label_create(scr);
+    lv_label_set_text(lbl_battery_pct, "");
+    lv_obj_set_style_text_font(lbl_battery_pct, &font_styrene_20, 0);
+    lv_obj_set_style_text_color(lbl_battery_pct, COL_DIM, 0);
+    lv_obj_align_to(lbl_battery_pct, battery_img, LV_ALIGN_OUT_LEFT_MID, -8, 0);
+
     // Divider under the title row (shared — same y on every screen)
     div_header = make_divider(scr, MARGIN, HDR_DIV_Y, CONTENT_W);
 
@@ -933,7 +942,7 @@ static void apply_battery_visibility(void) {
         else              lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
     }
 
-    lv_obj_t* hidden_on_splash_and_ohiggins[] = { battery_img, lbl_date, div_date };
+    lv_obj_t* hidden_on_splash_and_ohiggins[] = { battery_img, lbl_battery_pct, lbl_date, div_date };
     for (lv_obj_t* obj : hidden_on_splash_and_ohiggins) {
         if (!obj) continue;
         if (splash_mode || ohiggins_mode) lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
@@ -1240,6 +1249,12 @@ void ui_update_battery(int percent, bool charging) {
         idx = 3;  // full
     }
     lv_image_set_src(battery_img, &battery_dscs[idx]);
+    if (percent < 0) {
+        lv_label_set_text(lbl_battery_pct, "");
+    } else {
+        lv_label_set_text_fmt(lbl_battery_pct, "%d%%", percent);
+        lv_obj_align_to(lbl_battery_pct, battery_img, LV_ALIGN_OUT_LEFT_MID, -8, 0);
+    }
     apply_battery_visibility();
 }
 
